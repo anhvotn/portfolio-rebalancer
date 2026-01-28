@@ -19,47 +19,6 @@ An AI-powered web application that helps you analyze your investment portfolio a
 - Python 3.8 or higher
 - OpenAI API key ([Get one here](https://platform.openai.com/api-keys))
 
-### Installation
-
-1. **Clone the repository**
-```bash
-git clone https://github.com/YOUR_USERNAME/portfolio-rebalancer.git
-cd portfolio-rebalancer
-```
-
-2. **Create virtual environment**
-```bash
-python -m venv venv
-
-# Activate it:
-# On Mac/Linux:
-source venv/bin/activate
-# On Windows:
-venv\Scripts\activate
-```
-
-3. **Install dependencies**
-```bash
-pip install -r requirements.txt
-```
-
-4. **Set up environment variables**
-```bash
-# Copy the example file
-cp .env.example .env
-
-# Edit .env and add your OpenAI API key
-# OPENAI_API_KEY=sk-your-actual-key-here
-```
-
-5. **Run the application**
-```bash
-python app.py
-```
-
-6. **Open your browser**
-Navigate to: http://localhost:5000
-
 ## 📖 Usage
 
 ### Customize Your Portfolio
@@ -94,33 +53,12 @@ Try these example questions:
 - "What are the estimated transaction costs?"
 - "Is the market open?"
 
-## 🏗️ Architecture
-
 ### Key Components
 
 - **Portfolio Data Extension** - Manages holdings and target allocations
 - **Market Data Extension** - Fetches current prices (mock implementation)
 - **Rebalancing Engine** - Calculates optimal trades and costs
 - **AI Agent** - OpenAI GPT-4 with function calling capabilities
-
-## 🌐 Deployment
-
-### Local Development
-```bash
-python app.py
-```
-
-### Production (with Gunicorn)
-```bash
-pip install gunicorn
-gunicorn -w 4 -b 0.0.0.0:5000 app:app
-```
-
-### Public Sharing (for demos)
-```bash
-# Using ngrok
-ngrok http 5000
-```
 
 ## 🛠️ Technologies Used
 
@@ -154,3 +92,4 @@ MIT License - see LICENSE file for details
 # portfolio-rebalancer
 AI-powered portfolio rebalancing assistant using GPT-4
 >>>>>>> 64397c9de91592c5a813b1b410e3dea4fad49913
+
