@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Portfolio Rebalancing Assistant</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1>📊 Portfolio Rebalancing Assistant</h1>
+            <p>AI-powered portfolio analysis and rebalancing recommendations</p>
+        </header>
+        <div class="main-content">
+            <aside class="sidebar">
+                <div class="card">
+                    <h3>💼 Quick Actions</h3>
+                    <button onclick="sendQuickMessage('Analyze my portfolio')" class="btn btn-primary">Analyze Portfolio</button>
+                    <button onclick="sendQuickMessage('Show me rebalancing recommendations')" class="btn btn-secondary">Get Recommendations</button>
+                    <button onclick="sendQuickMessage('Calculate my allocation drift')" class="btn btn-secondary">Check Drift</button>
+                    <button onclick="sendQuickMessage('Is the market open?')" class="btn btn-secondary">Market Status</button>
+                </div>
+                <div class="card">
+                    <h3>📈 Portfolio Summary</h3>
+                    <div id="portfolio-summary">Loading...</div>
+                </div>
+            </aside>
+            <main class="chat-container">
+                <div id="chat-messages" class="chat-messages">
+                    <div class="message assistant-message">
+                        <div class="message-content">
+                            <strong>👋 Hello!</strong><br><br>
+                            I'm your Portfolio Rebalancing Assistant. I can help you:
+                            <ul>
+                                <li>Analyze your current portfolio allocation</li>
+                                <li>Calculate drift from target allocations</li>
+                                <li>Generate rebalancing recommendations</li>
+                                <li>Estimate transaction costs</li>
+                            </ul>
+                            What would you like to know?
+                        </div>
+                    </div>
+                </div>
+                <div id="function-calls" class="function-calls"></div>
+                <div class="input-area">
+                    <input type="text" id="user-input" placeholder="Ask me anything about your portfolio..." onkeypress="handleKeyPress(event)">
+                    <button onclick="sendMessage()" id="send-button" class="btn btn-send">Send</button>
+                    <button onclick="resetConversation()" class="btn btn-reset" title="Reset conversation">🔄</button>
+                </div>
+            </main>
+        </div>
+    </div>
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>

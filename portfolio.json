@@ -1,0 +1,35 @@
+{
+  "holdings": [
+    {
+      "symbol": "AAPL",
+      "shares": 50,
+      "current_price": 178.50,
+      "cost_basis": 150.00
+    },
+    {
+      "symbol": "GOOGL",
+      "shares": 30,
+      "current_price": 142.30,
+      "cost_basis": 120.00
+    },
+    {
+      "symbol": "VTI",
+      "shares": 100,
+      "current_price": 245.60,
+      "cost_basis": 220.00
+    },
+    {
+      "symbol": "BND",
+      "shares": 200,
+      "current_price": 72.30,
+      "cost_basis": 75.00
+    }
+  ],
+  "cash": 5000.00,
+  "target_allocation": {
+    "AAPL": 15.0,
+    "GOOGL": 10.0,
+    "VTI": 50.0,
+    "BND": 25.0
+  }
+}
