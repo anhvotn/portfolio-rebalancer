@@ -1,37 +1,16 @@
+<<<<<<< HEAD
 # 📊 Portfolio Rebalancing Assistant
 
-<div align="center">
-
-![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)
-![Flask](https://img.shields.io/badge/Flask-3.0-green.svg)
-![OpenAI](https://img.shields.io/badge/OpenAI-GPT--4-orange.svg)
-![License](https://img.shields.io/badge/License-MIT-yellow.svg)
-
-**An AI-powered web application that helps you analyze your investment portfolio and provides intelligent rebalancing recommendations using OpenAI's GPT-4.**
-
----
+An AI-powered web application that helps you analyze your investment portfolio and provides intelligent rebalancing recommendations using OpenAI GPT-4.
 
 ## ✨ Features
 
-### 🎯 Core Capabilities
-
-- **💼 Portfolio Analysis** - Get comprehensive analysis of your current holdings and allocations
-- **📈 Drift Tracking** - Monitor how far your allocation has drifted from your targets
-- **🎯 Smart Recommendations** - Receive AI-powered buy/sell recommendations to rebalance
-- **💰 Cost Estimation** - Calculate transaction costs before making trades
-- **🤖 Interactive Chat Interface** - Natural language interface powered by GPT-4
-- **⚡ Real-time Function Calling** - Watch the AI agent call functions to analyze your portfolio
-
-### 🛠️ Technical Features
-
-- OpenAI GPT-4 with function calling
-- Flask backend with RESTful API
-- Responsive modern UI with gradient design
-- Markdown-formatted AI responses
-- Session-based conversation memory
-- Modular extension architecture
-
----
+- 💼 **Portfolio Analysis** - Comprehensive analysis of your holdings and allocations
+- 📈 **Drift Tracking** - Monitor how far your allocation has drifted from targets
+- 🎯 **Smart Recommendations** - AI-powered buy/sell recommendations
+- 💰 **Cost Estimation** - Calculate transaction costs before rebalancing
+- 🤖 **Interactive Chat** - Natural language interface powered by GPT-4
+- 📱 **Responsive Design** - Beautiful UI that works on all devices
 
 ## 🚀 Quick Start
 
@@ -40,4 +19,138 @@
 - Python 3.8 or higher
 - OpenAI API key ([Get one here](https://platform.openai.com/api-keys))
 
+### Installation
 
+1. **Clone the repository**
+```bash
+git clone https://github.com/YOUR_USERNAME/portfolio-rebalancer.git
+cd portfolio-rebalancer
+```
+
+2. **Create virtual environment**
+```bash
+python -m venv venv
+
+# Activate it:
+# On Mac/Linux:
+source venv/bin/activate
+# On Windows:
+venv\Scripts\activate
+```
+
+3. **Install dependencies**
+```bash
+pip install -r requirements.txt
+```
+
+4. **Set up environment variables**
+```bash
+# Copy the example file
+cp .env.example .env
+
+# Edit .env and add your OpenAI API key
+# OPENAI_API_KEY=sk-your-actual-key-here
+```
+
+5. **Run the application**
+```bash
+python app.py
+```
+
+6. **Open your browser**
+Navigate to: http://localhost:5000
+
+## 📖 Usage
+
+### Customize Your Portfolio
+
+Edit `portfolio.json` to match your actual holdings:
+
+```json
+{
+  "holdings": [
+    {
+      "symbol": "AAPL",
+      "shares": 50,
+      "current_price": 178.50,
+      "cost_basis": 150.00
+    }
+  ],
+  "cash": 5000.00,
+  "target_allocation": {
+    "AAPL": 15.0,
+    "VTI": 50.0,
+    "BND": 35.0
+  }
+}
+```
+
+### Chat with the Assistant
+
+Try these example questions:
+- "Analyze my portfolio"
+- "Show me rebalancing recommendations"
+- "Calculate my allocation drift"
+- "What are the estimated transaction costs?"
+- "Is the market open?"
+
+## 🏗️ Architecture
+
+### Key Components
+
+- **Portfolio Data Extension** - Manages holdings and target allocations
+- **Market Data Extension** - Fetches current prices (mock implementation)
+- **Rebalancing Engine** - Calculates optimal trades and costs
+- **AI Agent** - OpenAI GPT-4 with function calling capabilities
+
+## 🌐 Deployment
+
+### Local Development
+```bash
+python app.py
+```
+
+### Production (with Gunicorn)
+```bash
+pip install gunicorn
+gunicorn -w 4 -b 0.0.0.0:5000 app:app
+```
+
+### Public Sharing (for demos)
+```bash
+# Using ngrok
+ngrok http 5000
+```
+
+## 🛠️ Technologies Used
+
+- **Backend**: Flask, Python
+- **AI**: OpenAI GPT-4 with function calling
+- **Frontend**: Vanilla JavaScript, HTML5, CSS3
+- **Markdown Rendering**: Marked.js
+
+## 🤝 Contributing
+
+Contributions are welcome! Feel free to submit a Pull Request.
+
+## ⚠️ Disclaimer
+
+This is a demonstration application for educational purposes. **Always consult with a qualified financial advisor before making investment decisions.** Past performance does not guarantee future results.
+
+## 📄 License
+
+MIT License - see LICENSE file for details
+
+## 🙏 Acknowledgments
+
+- Built with OpenAI GPT-4
+- Inspired by GitHub Copilot SDK patterns
+- UI design influenced by modern fintech applications
+
+---
+
+⭐ Star this repo if you find it helpful!
+=======
+# portfolio-rebalancer
+AI-powered portfolio rebalancing assistant using GPT-4
+>>>>>>> 64397c9de91592c5a813b1b410e3dea4fad49913
