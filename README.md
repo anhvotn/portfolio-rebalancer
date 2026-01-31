@@ -9,10 +9,6 @@
 
 **An AI-powered web application that helps you analyze your investment portfolio and provides intelligent rebalancing recommendations using OpenAI's GPT-4.**
 
-[View Demo](#) · [Report Bug](https://github.com/anhvotn/portfolio-rebalancer/issues) · [Request Feature](https://github.com/anhvotn/portfolio-rebalancer/issues)
-
-</div>
-
 ---
 
 ## ✨ Features
@@ -43,4 +39,5 @@
 
 - Python 3.8 or higher
 - OpenAI API key ([Get one here](https://platform.openai.com/api-keys))
+
 
