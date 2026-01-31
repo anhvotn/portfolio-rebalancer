@@ -15,15 +15,6 @@
 
 ---
 
-## 📸 Screenshots
-
-<div align="center">
-  <img src="https://via.placeholder.com/800x450/667eea/ffffff?text=Portfolio+Rebalancing+Assistant" alt="App Screenshot" width="800"/>
-  <p><i>AI-powered portfolio analysis and rebalancing recommendations</i></p>
-</div>
-
----
-
 ## ✨ Features
 
 ### 🎯 Core Capabilities
@@ -53,10 +44,3 @@
 - Python 3.8 or higher
 - OpenAI API key ([Get one here](https://platform.openai.com/api-keys))
 
-### Installation
-
-1. **Clone the repository**
-
-```bash
-git clone https://github.com/anhvotn/portfolio-rebalancer.git
-cd portfolio-rebalancer
