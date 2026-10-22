@@ -1,158 +1,259 @@
-import openai
+"""Portfolio rebalancing assistant: deterministic portfolio tools + an OpenAI tool-calling agent.
+
+The numbers (drift, trades, costs) are always computed in Python from portfolio.json;
+the language model only decides which tool to call and explains the results.
+"""
 import json
 import os
-from typing import List, Dict, Any
-from datetime import datetime, time
+from datetime import date, datetime, time, timedelta
+from typing import Any, Dict, List, Optional, Tuple
+from zoneinfo import ZoneInfo
 
+import openai
+
+CASH_KEY = "CASH"
+NY = ZoneInfo("America/New_York")
+
+
+# --------------------------------------------------------------------------
+# Portfolio data
+# --------------------------------------------------------------------------
 class PortfolioDataExtension:
     def __init__(self, portfolio_db_path: str = "portfolio.json"):
         self.db_path = portfolio_db_path
-    
+
+    def _load(self) -> Dict[str, Any]:
+        with open(self.db_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+
     def get_portfolio_holdings(self) -> Dict[str, Any]:
         try:
-            with open(self.db_path, 'r') as f:
-                portfolio_data = json.load(f)
-            total_value = self._calculate_total_value(portfolio_data)
-            return {
-                "status": "success",
-                "holdings": portfolio_data.get("holdings", []),
-                "cash": portfolio_data.get("cash", 0),
-                "total_value": total_value
-            }
+            data = self._load()
         except FileNotFoundError:
-            return {"status": "error", "message": "Portfolio data not found"}
-    
+            return {"status": "error", "message": f"Portfolio file '{self.db_path}' not found"}
+        except json.JSONDecodeError as e:
+            return {"status": "error", "message": f"Portfolio file is not valid JSON: {e}"}
+        holdings = data.get("holdings", [])
+        cash = float(data.get("cash", 0))
+        invested = sum(h["shares"] * h["current_price"] for h in holdings)
+        return {"status": "success", "holdings": holdings, "cash": cash,
+                "invested_value": round(invested, 2), "total_value": round(invested + cash, 2),
+                "currency": data.get("currency", "USD")}
+
     def get_target_allocation(self) -> Dict[str, float]:
+        """Target weights in % of TOTAL value. Optional key 'CASH'; if absent, the
+        remainder (100 - sum of targets) is treated as the cash target."""
         try:
-            with open(self.db_path, 'r') as f:
-                portfolio_data = json.load(f)
-            return portfolio_data.get("target_allocation", {})
-        except FileNotFoundError:
+            targets = {k: float(v) for k, v in self._load().get("target_allocation", {}).items()}
+        except (FileNotFoundError, json.JSONDecodeError):
             return {}
-    
+        if CASH_KEY not in targets:
+            targets[CASH_KEY] = round(max(0.0, 100.0 - sum(targets.values())), 4)
+        return targets
+
     def calculate_allocation_drift(self) -> Dict[str, Any]:
-        holdings = self.get_portfolio_holdings()
+        h = self.get_portfolio_holdings()
+        if h["status"] != "success":
+            return h
         targets = self.get_target_allocation()
-        if holdings["status"] != "success":
-            return holdings
-        total_value = holdings["total_value"]
+        total = h["total_value"]
+        if total <= 0:
+            return {"status": "error", "message": "Portfolio total value is zero"}
+        values = {x["symbol"]: x["shares"] * x["current_price"] for x in h["holdings"]}
+        values[CASH_KEY] = h["cash"]
         drift = {}
-        for holding in holdings["holdings"]:
-            symbol = holding["symbol"]
-            current_value = holding["shares"] * holding["current_price"]
-            current_pct = (current_value / total_value) * 100
-            target_pct = targets.get(symbol, 0)
-            drift[symbol] = {
-                "current_allocation": round(current_pct, 2),
-                "target_allocation": target_pct,
-                "drift": round(current_pct - target_pct, 2),
-                "drift_dollars": round((current_pct - target_pct) / 100 * total_value, 2)
-            }
-        return drift
-    
-    def _calculate_total_value(self, portfolio_data: Dict) -> float:
-        holdings_value = sum(h["shares"] * h["current_price"] for h in portfolio_data.get("holdings", []))
-        return holdings_value + portfolio_data.get("cash", 0)
+        for sym in sorted(set(values) | set(targets)):
+            cur_pct = values.get(sym, 0.0) / total * 100
+            tgt = targets.get(sym, 0.0)
+            drift[sym] = {"current_allocation": round(cur_pct, 2), "target_allocation": round(tgt, 2),
+                          "drift": round(cur_pct - tgt, 2),
+                          "drift_value": round((cur_pct - tgt) / 100 * total, 2)}
+        warn = None
+        s = sum(v for k, v in targets.items() if k != CASH_KEY) + targets.get(CASH_KEY, 0)
+        if abs(s - 100) > 0.01:
+            warn = f"Targets sum to {s:.2f}%, not 100%"
+        return {"status": "success", "total_value": total, "drift": drift, "warning": warn}
+
+
+# --------------------------------------------------------------------------
+# Market data (prices from portfolio.json; mock fallback for unknown symbols)
+# --------------------------------------------------------------------------
+def _nth_weekday(year, month, weekday, n):
+    d = date(year, month, 1)
+    d += timedelta(days=(weekday - d.weekday()) % 7)
+    return d + timedelta(weeks=n - 1)
+
+
+def _last_weekday(year, month, weekday):
+    d = date(year, month + 1, 1) - timedelta(days=1) if month < 12 else date(year, 12, 31)
+    return d - timedelta(days=(d.weekday() - weekday) % 7)
+
+
+def _observed(d):
+    return d - timedelta(days=1) if d.weekday() == 5 else (d + timedelta(days=1) if d.weekday() == 6 else d)
+
+
+def _easter(y):
+    a, b, c = y % 19, y // 100, y % 100
+    d, e = b // 4, b % 4
+    f = (b + 8) // 25
+    g = (b - f + 1) // 3
+    h = (19 * a + b - d - g + 15) % 30
+    i, k = c // 4, c % 4
+    l = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 22 * l) // 451
+    month = (h + l - 7 * m + 114) // 31
+    day = ((h + l - 7 * m + 114) % 31) + 1
+    return date(y, month, day)
+
+
+def nyse_holidays(year: int) -> set:
+    """Regular NYSE full-day holidays (rule-based; ad-hoc closures are not included)."""
+    hol = {_observed(date(year, 1, 1)), _nth_weekday(year, 1, 0, 3), _nth_weekday(year, 2, 0, 3),
+           _easter(year) - timedelta(days=2), _last_weekday(year, 5, 0),
+           _observed(date(year, 7, 4)), _nth_weekday(year, 9, 0, 1), _nth_weekday(year, 11, 3, 4),
+           _observed(date(year, 12, 25))}
+    if year >= 2022:
+        hol.add(_observed(date(year, 6, 19)))
+    return hol
+
 
 class MarketDataExtension:
-    def get_current_price(self, symbol: str) -> Dict[str, Any]:
-        mock_prices = {"AAPL": 178.50, "GOOGL": 142.30, "MSFT": 378.90, "VTI": 245.60, "BND": 72.30}
-        return {"symbol": symbol, "price": mock_prices.get(symbol, 100.0), "timestamp": datetime.now().isoformat(), "source": "mock_data"}
-    
-    def get_multiple_prices(self, symbols: List[str]) -> Dict[str, float]:
-        return {symbol: self.get_current_price(symbol)["price"] for symbol in symbols}
-    
-    def is_market_open(self) -> Dict[str, Any]:
-        now = datetime.now()
-        market_open = time(9, 30)
-        market_close = time(16, 0)
-        current_time = now.time()
-        is_weekday = now.weekday() < 5
-        is_trading_hours = market_open <= current_time <= market_close
-        return {
-            "is_open": is_weekday and is_trading_hours,
-            "next_open": "Next business day 9:30 AM ET" if not is_weekday else "Today 9:30 AM ET",
-            "current_time": now.isoformat()
-        }
+    MOCK_PRICES = {"AAPL": 178.50, "GOOGL": 142.30, "MSFT": 378.90, "VTI": 245.60, "BND": 72.30}
 
+    def __init__(self, portfolio: Optional[PortfolioDataExtension] = None):
+        self.portfolio = portfolio
+
+    def get_current_price(self, symbol: str) -> Dict[str, Any]:
+        symbol = symbol.upper()
+        if self.portfolio:
+            h = self.portfolio.get_portfolio_holdings()
+            for x in h.get("holdings", []):
+                if x["symbol"].upper() == symbol:
+                    return {"symbol": symbol, "price": x["current_price"], "source": "portfolio.json"}
+        if symbol in self.MOCK_PRICES:
+            return {"symbol": symbol, "price": self.MOCK_PRICES[symbol], "source": "mock (not a live quote)"}
+        return {"symbol": symbol, "price": None, "source": "unknown symbol - add it to portfolio.json"}
+
+    def get_multiple_prices(self, symbols: List[str]) -> Dict[str, Any]:
+        return {s.upper(): self.get_current_price(s) for s in symbols}
+
+    def is_market_open(self, now: Optional[datetime] = None) -> Dict[str, Any]:
+        """US equity market (NYSE) regular session, 09:30-16:00 New York time."""
+        now = (now or datetime.now(tz=NY)).astimezone(NY)
+        today = now.date()
+
+        def trading_day(d):
+            return d.weekday() < 5 and d not in nyse_holidays(d.year)
+
+        is_open = trading_day(today) and time(9, 30) <= now.time() < time(16, 0)
+        d = today if (trading_day(today) and now.time() < time(9, 30)) else today + timedelta(days=1)
+        while not trading_day(d):
+            d += timedelta(days=1)
+        return {"is_open": is_open, "new_york_time": now.strftime("%Y-%m-%d %H:%M %Z"),
+                "next_open": None if is_open else f"{d.isoformat()} 09:30 ET",
+                "note": "Regular session only; early closes and ad-hoc closures not modelled."}
+
+
+# --------------------------------------------------------------------------
+# Rebalancing engine (reads the portfolio itself - no arguments from the model)
+# --------------------------------------------------------------------------
 class RebalancingEngineExtension:
-    def __init__(self, threshold_pct: float = 5.0, min_trade_amount: float = 100.0):
+    def __init__(self, portfolio: PortfolioDataExtension, threshold_pct: float = 5.0,
+                 min_trade_amount: float = 100.0, allow_fractional: bool = False):
+        self.portfolio = portfolio
         self.threshold_pct = threshold_pct
         self.min_trade_amount = min_trade_amount
-    
-    def generate_rebalance_recommendations(self, current_holdings: Dict[str, Any], target_allocation: Dict[str, float], current_prices: Dict[str, float]) -> List[Dict[str, Any]]:
-        recommendations = []
-        total_value = current_holdings["total_value"]
-        for holding in current_holdings["holdings"]:
-            symbol = holding["symbol"]
-            current_shares = holding["shares"]
-            current_price = current_prices.get(symbol, holding["current_price"])
-            current_value = current_shares * current_price
-            current_pct = (current_value / total_value) * 100
-            target_pct = target_allocation.get(symbol, 0)
-            drift_pct = current_pct - target_pct
-            if abs(drift_pct) > self.threshold_pct:
-                target_value = (target_pct / 100) * total_value
-                target_shares = target_value / current_price
-                shares_diff = target_shares - current_shares
-                trade_value = abs(shares_diff * current_price)
-                if trade_value > self.min_trade_amount:
-                    recommendations.append({
-                        "symbol": symbol,
-                        "action": "BUY" if shares_diff > 0 else "SELL",
-                        "shares": round(abs(shares_diff), 2),
-                        "estimated_value": round(trade_value, 2),
-                        "current_allocation": round(current_pct, 2),
-                        "target_allocation": target_pct,
-                        "drift_pct": round(drift_pct, 2),
-                        "priority": self._calculate_priority(abs(drift_pct))
-                    })
-        recommendations.sort(key=lambda x: x["priority"], reverse=True)
-        return recommendations
-    
-    def calculate_transaction_costs(self, recommendations: List[Dict[str, Any]], commission_per_trade: float = 0.0, spread_bps: float = 2.0) -> Dict[str, Any]:
-        num_trades = len(recommendations)
-        total_commission = num_trades * commission_per_trade
-        spread_costs = sum(rec["estimated_value"] * (spread_bps / 10000) for rec in recommendations)
-        total_costs = total_commission + spread_costs
-        return {
-            "num_trades": num_trades,
-            "commission_costs": round(total_commission, 2),
-            "spread_costs": round(spread_costs, 2),
-            "total_estimated_costs": round(total_costs, 2)
-        }
-    
-    def _calculate_priority(self, drift_pct: float) -> int:
-        if drift_pct > 15: return 5
-        elif drift_pct > 10: return 4
-        elif drift_pct > 7: return 3
-        elif drift_pct > 5: return 2
-        else: return 1
+        self.allow_fractional = allow_fractional
+
+    def generate_rebalance_recommendations(self) -> Dict[str, Any]:
+        h = self.portfolio.get_portfolio_holdings()
+        if h["status"] != "success":
+            return h
+        targets = self.portfolio.get_target_allocation()
+        total = h["total_value"]
+        prices = {x["symbol"]: x["current_price"] for x in h["holdings"]}
+        shares = {x["symbol"]: x["shares"] for x in h["holdings"]}
+        missing = [s for s in targets if s != CASH_KEY and s not in prices]
+        recs = []
+        for sym in sorted(set(prices) | {s for s in targets if s != CASH_KEY}):
+            if sym not in prices:
+                continue  # target for a symbol without a price: reported in 'missing_prices'
+            price = prices[sym]
+            cur_val = shares.get(sym, 0) * price
+            cur_pct = cur_val / total * 100
+            tgt_pct = targets.get(sym, 0.0)
+            drift = cur_pct - tgt_pct
+            if abs(drift) <= self.threshold_pct:
+                continue
+            diff_sh = (tgt_pct / 100 * total - cur_val) / price
+            if not self.allow_fractional:
+                diff_sh = int(diff_sh)  # round toward zero: never overshoot
+            value = abs(diff_sh * price)
+            if diff_sh == 0 or value < self.min_trade_amount:
+                continue
+            recs.append({"symbol": sym, "action": "BUY" if diff_sh > 0 else "SELL",
+                         "shares": round(abs(diff_sh), 4), "estimated_value": round(value, 2),
+                         "current_allocation": round(cur_pct, 2), "target_allocation": tgt_pct,
+                         "drift_pct": round(drift, 2), "priority": self._priority(abs(drift))})
+        # cash check: sells fund buys; scale buys down if cash would go negative
+        sells = sum(r["estimated_value"] for r in recs if r["action"] == "SELL")
+        buys = sum(r["estimated_value"] for r in recs if r["action"] == "BUY")
+        available = h["cash"] + sells
+        note = None
+        if buys > available and buys > 0:
+            f = available / buys
+            for r in recs:
+                if r["action"] == "BUY":
+                    sh = r["shares"] * f
+                    sh = sh if self.allow_fractional else int(sh)
+                    r["shares"] = round(sh, 4)
+                    r["estimated_value"] = round(sh * prices[r["symbol"]], 2)
+            recs = [r for r in recs if r["shares"] > 0]
+            note = f"Buys scaled to {f:.0%} to stay within available cash"
+            buys = sum(r["estimated_value"] for r in recs if r["action"] == "BUY")
+        recs.sort(key=lambda r: (r["priority"], abs(r["drift_pct"])), reverse=True)
+        return {"status": "success", "threshold_pct": self.threshold_pct, "recommendations": recs,
+                "cash_before": h["cash"], "cash_after_estimate": round(h["cash"] + sells - buys, 2),
+                "missing_prices": missing, "note": note}
+
+    def calculate_transaction_costs(self, commission_per_trade: float = 0.0,
+                                    spread_bps: float = 2.0) -> Dict[str, Any]:
+        r = self.generate_rebalance_recommendations()
+        if r.get("status") != "success":
+            return r
+        recs = r["recommendations"]
+        commission = len(recs) * commission_per_trade
+        spread = sum(x["estimated_value"] * spread_bps / 10000 for x in recs)
+        return {"num_trades": len(recs), "commission_costs": round(commission, 2),
+                "spread_costs": round(spread, 2), "total_estimated_costs": round(commission + spread, 2),
+                "assumptions": {"commission_per_trade": commission_per_trade, "spread_bps": spread_bps}}
+
+    @staticmethod
+    def _priority(d: float) -> int:
+        return 5 if d > 15 else 4 if d > 10 else 3 if d > 7 else 2 if d > 5 else 1
+
+
+# --------------------------------------------------------------------------
+# Agent
+# --------------------------------------------------------------------------
+NO_ARGS = {"type": "object", "properties": {}, "required": []}
+
 
 class PortfolioRebalancerAgent:
-    def __init__(self, api_key: str):
-        self.client = openai.OpenAI(api_key=api_key)
-        self.model = os.getenv("MODEL_NAME", "gpt-4-turbo-preview")
-        self.portfolio_ext = PortfolioDataExtension()
-        self.market_ext = MarketDataExtension()
-        self.rebalancing_ext = RebalancingEngineExtension()
-        self.functions = self._build_function_registry()
-        self.tools = self._build_tools_schema()
-        self.system_prompt = """You are an expert financial advisor specializing in portfolio management.
-Your role is to help users rebalance their investment portfolios to maintain target allocations while considering transaction costs, tax implications, and market conditions.
+    MAX_TOOL_ROUNDS = 8
 
-Always:
-1. Check current portfolio holdings and allocation
-2. Compare against target allocation
-3. Calculate drift and prioritize rebalancing needs
-4. Consider transaction costs
-5. Provide clear, actionable recommendations with reasoning
-6. Use markdown formatting for better readability
-
-Be conversational, clear, and always explain your reasoning."""
-    
-    def _build_function_registry(self) -> Dict[str, Any]:
-        return {
+    def __init__(self, api_key: str, portfolio_path: str = "portfolio.json", client=None):
+        self.client = client or openai.OpenAI(api_key=api_key)
+        self.model = os.getenv("MODEL_NAME", "gpt-4o-mini")
+        self.portfolio_ext = PortfolioDataExtension(portfolio_path)
+        self.market_ext = MarketDataExtension(self.portfolio_ext)
+        self.rebalancing_ext = RebalancingEngineExtension(
+            self.portfolio_ext,
+            threshold_pct=float(os.getenv("REBALANCE_THRESHOLD_PCT", 5)),
+            min_trade_amount=float(os.getenv("MIN_TRADE_AMOUNT", 100)),
+            allow_fractional=os.getenv("ALLOW_FRACTIONAL_SHARES", "false").lower() == "true")
+        self.functions = {
             "get_portfolio_holdings": self.portfolio_ext.get_portfolio_holdings,
             "get_target_allocation": self.portfolio_ext.get_target_allocation,
             "calculate_allocation_drift": self.portfolio_ext.calculate_allocation_drift,
@@ -162,45 +263,70 @@ Be conversational, clear, and always explain your reasoning."""
             "generate_rebalance_recommendations": self.rebalancing_ext.generate_rebalance_recommendations,
             "calculate_transaction_costs": self.rebalancing_ext.calculate_transaction_costs,
         }
-    
-    def _build_tools_schema(self) -> List[Dict[str, Any]]:
-        return [
-            {"type": "function", "function": {"name": "get_portfolio_holdings", "description": "Get current portfolio holdings", "parameters": {"type": "object", "properties": {}, "required": []}}},
-            {"type": "function", "function": {"name": "get_target_allocation", "description": "Get target allocation percentages", "parameters": {"type": "object", "properties": {}, "required": []}}},
-            {"type": "function", "function": {"name": "calculate_allocation_drift", "description": "Calculate allocation drift", "parameters": {"type": "object", "properties": {}, "required": []}}},
-            {"type": "function", "function": {"name": "get_current_price", "description": "Get price for symbol", "parameters": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}}},
-            {"type": "function", "function": {"name": "get_multiple_prices", "description": "Get multiple prices", "parameters": {"type": "object", "properties": {"symbols": {"type": "array", "items": {"type": "string"}}}, "required": ["symbols"]}}},
-            {"type": "function", "function": {"name": "is_market_open", "description": "Check if market is open", "parameters": {"type": "object", "properties": {}, "required": []}}},
-            {"type": "function", "function": {"name": "generate_rebalance_recommendations", "description": "Generate rebalancing recommendations", "parameters": {"type": "object", "properties": {"current_holdings": {"type": "object"}, "target_allocation": {"type": "object"}, "current_prices": {"type": "object"}}, "required": ["current_holdings", "target_allocation", "current_prices"]}}},
-            {"type": "function", "function": {"name": "calculate_transaction_costs", "description": "Calculate transaction costs", "parameters": {"type": "object", "properties": {"recommendations": {"type": "array"}}, "required": ["recommendations"]}}}
+        self.tools = [
+            self._tool("get_portfolio_holdings", "Current holdings, cash and total value from portfolio.json"),
+            self._tool("get_target_allocation", "Target weights in % of total value (CASH = cash target)"),
+            self._tool("calculate_allocation_drift", "Current vs target weight for every holding, target and cash"),
+            self._tool("get_current_price", "Price of one symbol (from portfolio.json; not a live quote)",
+                       {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}),
+            self._tool("get_multiple_prices", "Prices of several symbols",
+                       {"type": "object", "properties": {"symbols": {"type": "array", "items": {"type": "string"}}},
+                        "required": ["symbols"]}),
+            self._tool("is_market_open", "Whether the US stock market (NYSE) is open now, in New York time"),
+            self._tool("generate_rebalance_recommendations",
+                       "Buy/sell trades that bring drifted positions back to target (computed from portfolio.json)"),
+            self._tool("calculate_transaction_costs", "Estimated costs of the recommended trades",
+                       {"type": "object", "properties": {
+                           "commission_per_trade": {"type": "number", "description": "fee per trade, default 0"},
+                           "spread_bps": {"type": "number", "description": "half-spread in basis points, default 2"}},
+                        "required": []}),
         ]
-    
-    def chat(self, user_message: str, conversation_history: List[Dict] = None) -> tuple:
-        if conversation_history is None:
-            conversation_history = []
-        conversation_history.append({"role": "user", "content": user_message})
-        messages = [{"role": "system", "content": self.system_prompt}] + conversation_history
-        function_calls_made = []
-        response = self.client.chat.completions.create(model=self.model, messages=messages, tools=self.tools, tool_choice="auto")
-        while response.choices[0].message.tool_calls:
-            assistant_message = response.choices[0].message
-            conversation_history.append({"role": "assistant", "content": assistant_message.content, "tool_calls": assistant_message.tool_calls})
-            for tool_call in assistant_message.tool_calls:
-                function_name = tool_call.function.name
-                function_args = json.loads(tool_call.function.arguments)
-                function_calls_made.append({"name": function_name, "arguments": function_args})
-                function_response = self._execute_function(function_name, function_args)
-                conversation_history.append({"role": "tool", "tool_call_id": tool_call.id, "content": json.dumps(function_response)})
-            messages = [{"role": "system", "content": self.system_prompt}] + conversation_history
-            response = self.client.chat.completions.create(model=self.model, messages=messages, tools=self.tools, tool_choice="auto")
-        assistant_response = response.choices[0].message.content
-        conversation_history.append({"role": "assistant", "content": assistant_response})
-        return assistant_response, conversation_history, function_calls_made
-    
-    def _execute_function(self, function_name: str, arguments: Dict[str, Any]) -> Any:
-        if function_name not in self.functions:
-            return {"error": f"Function {function_name} not found"}
+        self.system_prompt = (
+            "You are a portfolio rebalancing assistant for educational use. Always use the tools to get "
+            "holdings, drift, trades and costs - never invent numbers. Prices come from portfolio.json and "
+            "are not live quotes; say so when relevant. Explain your reasoning clearly in markdown. "
+            "You do not give personalised investment, tax or legal advice; remind the user to consider "
+            "taxes and to consult a qualified adviser before trading.")
+
+    @staticmethod
+    def _tool(name, desc, params=None):
+        return {"type": "function", "function": {"name": name, "description": desc, "parameters": params or NO_ARGS}}
+
+    def chat(self, user_message: str, conversation_history: Optional[List[Dict]] = None) -> Tuple[str, List[Dict], List[Dict]]:
+        history = list(conversation_history or [])
+        history.append({"role": "user", "content": user_message})
+        calls_made = []
+        for _ in range(self.MAX_TOOL_ROUNDS):
+            response = self.client.chat.completions.create(
+                model=self.model, messages=[{"role": "system", "content": self.system_prompt}] + history,
+                tools=self.tools, tool_choice="auto")
+            msg = response.choices[0].message
+            if not msg.tool_calls:
+                answer = msg.content or ""
+                history.append({"role": "assistant", "content": answer})
+                return answer, history, calls_made
+            # store plain dicts (JSON-serialisable), not SDK objects
+            history.append({"role": "assistant", "content": msg.content,
+                            "tool_calls": [{"id": tc.id, "type": "function",
+                                            "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
+                                           for tc in msg.tool_calls]})
+            for tc in msg.tool_calls:
+                try:
+                    args = json.loads(tc.function.arguments or "{}")
+                except json.JSONDecodeError:
+                    args = {}
+                calls_made.append({"name": tc.function.name, "arguments": args})
+                result = self._execute_function(tc.function.name, args)
+                history.append({"role": "tool", "tool_call_id": tc.id, "content": json.dumps(result, default=str)})
+        answer = "Sorry - I could not finish that request (too many tool steps). Please try a simpler question."
+        history.append({"role": "assistant", "content": answer})
+        return answer, history, calls_made
+
+    def _execute_function(self, name: str, arguments: Dict[str, Any]) -> Any:
+        fn = self.functions.get(name)
+        if fn is None:
+            return {"error": f"Function {name} not found"}
         try:
-            return self.functions[function_name](**arguments)
-        except Exception as e:
-            return {"error": str(e)}
+            return fn(**arguments)
+        except Exception as e:  # report to the model instead of crashing the request
+            return {"error": f"{type(e).__name__}: {e}"}
