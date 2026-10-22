@@ -1,33 +1,43 @@
 window.addEventListener('DOMContentLoaded', () => { loadPortfolioSummary(); });
 
+function fmt(n) { return Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+
 async function loadPortfolioSummary() {
+    const box = document.getElementById('portfolio-summary');
     try {
         const response = await fetch('/api/portfolio');
         const data = await response.json();
-        if (data.error) {
-            document.getElementById('portfolio-summary').innerHTML = `<p style="color: #d32f2f;">${data.error}</p>`;
-            return;
-        }
-        const holdings = data.holdings;
-        let html = `<div class="portfolio-item"><strong>Total Value:</strong> $${holdings.total_value.toLocaleString()}</div>
-                    <div class="portfolio-item"><strong>Cash:</strong> $${holdings.cash.toLocaleString()}</div>
-                    <div class="portfolio-item"><strong>Holdings:</strong> ${holdings.holdings.length}</div>`;
-        document.getElementById('portfolio-summary').innerHTML = html;
+        if (!response.ok || data.error) { box.innerHTML = ''; box.appendChild(errorLine(data.error || 'Failed to load portfolio')); return; }
+        const h = data.holdings, ccy = h.currency || 'USD';
+        box.innerHTML = '';
+        [['Total Value', `${ccy} ${fmt(h.total_value)}`], ['Cash', `${ccy} ${fmt(h.cash)}`], ['Holdings', h.holdings.length]]
+            .forEach(([label, value]) => {
+                const div = document.createElement('div');
+                div.className = 'portfolio-item';
+                const strong = document.createElement('strong');
+                strong.textContent = label + ': ';
+                div.appendChild(strong);
+                div.appendChild(document.createTextNode(value));
+                box.appendChild(div);
+            });
     } catch (error) {
         console.error('Error loading portfolio:', error);
-        document.getElementById('portfolio-summary').innerHTML = '<p style="color: #d32f2f;">Failed to load portfolio</p>';
+        box.innerHTML = '';
+        box.appendChild(errorLine('Failed to load portfolio'));
     }
 }
 
-function handleKeyPress(event) { if (event.key === 'Enter') { sendMessage(); } }
+function errorLine(text) { const p = document.createElement('p'); p.style.color = '#d32f2f'; p.textContent = text; return p; }
+
+function handleKeyPress(event) { if (event.key === 'Enter') { event.preventDefault(); sendMessage(); } }
 
 async function sendMessage() {
     const input = document.getElementById('user-input');
     const message = input.value.trim();
-    if (!message) return;
+    const sendButton = document.getElementById('send-button');
+    if (!message || sendButton.disabled) return;
     input.value = '';
     addMessage(message, 'user');
-    const sendButton = document.getElementById('send-button');
     sendButton.disabled = true;
     sendButton.textContent = 'Thinking...';
     document.getElementById('function-calls').innerHTML = '';
@@ -38,7 +48,7 @@ async function sendMessage() {
             body: JSON.stringify({ message })
         });
         const data = await response.json();
-        if (data.error) { addMessage(`Error: ${data.error}`, 'assistant'); }
+        if (!response.ok || data.error) { addMessage(`Error: ${data.error || response.statusText}`, 'assistant'); }
         else {
             if (data.function_calls && data.function_calls.length > 0) { showFunctionCalls(data.function_calls); }
             addMessage(data.response, 'assistant');
@@ -61,8 +71,11 @@ function addMessage(content, role) {
     messageDiv.className = `message ${role}-message`;
     const contentDiv = document.createElement('div');
     contentDiv.className = 'message-content';
-    if (role === 'assistant') { contentDiv.innerHTML = marked.parse(content); }
-    else { contentDiv.textContent = content; }
+    if (role === 'assistant' && window.marked && window.DOMPurify) {
+        contentDiv.innerHTML = DOMPurify.sanitize(marked.parse(content || ''));
+    } else {
+        contentDiv.textContent = content || '';
+    }
     messageDiv.appendChild(contentDiv);
     messagesContainer.appendChild(messageDiv);
     messagesContainer.scrollTop = messagesContainer.scrollHeight;
@@ -74,7 +87,15 @@ function showFunctionCalls(functionCalls) {
     functionCalls.forEach(call => {
         const callDiv = document.createElement('div');
         callDiv.className = 'function-call-item';
-        callDiv.innerHTML = `<strong>${call.name}</strong>${Object.keys(call.arguments).length > 0 ? `<br><small>${JSON.stringify(call.arguments)}</small>` : ''}`;
+        const name = document.createElement('strong');
+        name.textContent = call.name;
+        callDiv.appendChild(name);
+        if (call.arguments && Object.keys(call.arguments).length > 0) {
+            const small = document.createElement('small');
+            small.textContent = JSON.stringify(call.arguments);
+            callDiv.appendChild(document.createElement('br'));
+            callDiv.appendChild(small);
+        }
         container.appendChild(callDiv);
     });
 }
@@ -84,7 +105,8 @@ async function resetConversation() {
     try {
         await fetch('/api/reset', { method: 'POST' });
         const messagesContainer = document.getElementById('chat-messages');
-        messagesContainer.innerHTML = `<div class="message assistant-message"><div class="message-content"><strong>👋 Hello!</strong><br><br>I'm your Portfolio Rebalancing Assistant. What would you like to know?</div></div>`;
+        messagesContainer.innerHTML = '';
+        addMessage("**👋 Hello!**\n\nI'm your Portfolio Rebalancing Assistant. What would you like to know?", 'assistant');
         document.getElementById('function-calls').innerHTML = '';
     } catch (error) {
         console.error('Error resetting conversation:', error);
